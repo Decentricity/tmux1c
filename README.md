@@ -6,14 +6,14 @@ tmux session; start it again to reattach without losing panes or shell state.
 ## Install or update
 
 ~~~bash
-git clone https://github.com/Decentricity/tmux1c.git
-cd tmux1c
-bash install.sh
+curl -fsSL https://agent1c.ai/tmux1c.sh | sh
 1c
 ~~~
 
-For an existing checkout, use `git pull` and rerun `bash install.sh`. The repo
-is private; GitHub access is required to clone it. Supported environments are
+Rerun the same command to update. The public installer verifies the SHA-256
+checksums of the files it downloads before running the setup script. You can
+also clone this repository and run `bash install.sh` directly. Supported
+environments are
 **Ubuntu, Debian, Fedora, Arch Linux, openSUSE Leap/Tumbleweed, Alpine Linux,
 and Termux on Android**. The installer states the supported list and detected
 environment before it changes files. Other environments are rejected.
