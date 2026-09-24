@@ -13,10 +13,20 @@ bash install.sh
 ~~~
 
 For an existing checkout, use `git pull` and rerun `bash install.sh`. The repo
-is private; GitHub access is required to clone it. The installer checks for
-tmux, installs it when absent through apt, dnf, pacman, apk, zypper, Homebrew,
-or pkg, then installs the launcher at `~/.local/bin/1c`. If that location isn't
-on PATH, it prints the line to add to your shell startup file.
+is private; GitHub access is required to clone it. Supported environments are
+**Ubuntu, Debian, Fedora, Arch Linux, openSUSE Leap/Tumbleweed, Alpine Linux,
+and Termux on Android**. The installer states the supported list and detected
+environment before it changes files. Other environments are rejected.
+
+The installer copies `1c` to `~/.local/bin` and runs the interactive first-run
+script once. That script asks about NVIDIA graphics, lists missing packages,
+and asks **separately** before installing each one using the detected distro's
+package manager. It offers tmux if missing and htop for CPU-monitor panes.
+Declining optional packages leaves usable shell panes. If installation was
+noninteractive, run `1c setup` later; invoking a profile also triggers pending
+first-run setup. `1c check` shows missing commands without making changes.
+Run `1c setup` any time to review your choices again. If `~/.local/bin` isn't
+on PATH, the installer prints the line to add to your shell startup file.
 
 **No arguments opens the menu.** Use the up/down arrows and Enter to start a
 profile. `q` or Esc quits; `j`/`k` also move the selection. Use `1c list` for
@@ -48,17 +58,25 @@ switches to that profile's session.
 
 ## Apps and fallbacks
 
-The installer installs **tmux only**. Other apps are opt-in; profiles open
-usable shell panes with guidance when an app is missing. `htop` and `nvtop`
-fall back to `top`. File panes prefer `yazi`, then `mc`. Editor panes prefer
-`micro`, then `vi`. Git status refreshes every ten seconds only while a profile
-using it is open.
+First run offers the missing distro packages for tmux, htop, git, micro, mc,
+lazygit, lnav, calcurse, cava, and gh. On Arch it also offers yazi. **nvtop is
+offered only after a Yes to NVIDIA** on a regular Linux distro. If you answer
+No, GPU panes stay blank terminal shells, even if nvtop happens to be installed.
+CPU panes prefer `htop` and fall back to `top` if it is declined or unavailable.
+File panes prefer `mc`, then `yazi`; editor panes prefer `micro`, then `vi`.
+Packages that aren't in your configured distro repositories are reported as
+failed, and setup moves to the next item. Git status refreshes every ten
+seconds only while a profile using it is open.
 
 Some profiles use your own machine-specific commands: `pi`, `gcal`,
 `telegramy`, `whatsappy`, `bookmarks`, `exa-search`, `living-caca`, and
-`soloist`. Install and authenticate them separately; tmux1c doesn't copy
-credentials or start them outside their selected profile. Pi is the only
-agent command used for now.
+`soloist`. If Node.js 22.19+ and npm are already present, first run can offer
+Pi's official npm package as a separate opt-in install. The remaining custom
+commands are diagnosed without pretending they are distro packages. Install
+and authenticate them separately; tmux1c doesn't copy credentials or start
+them outside their selected profile. Pi is the only agent command used for now;
+installing Pi itself does not recreate your local Ollama model and custom
+wrapper configuration.
 
 For IDE log-following or Service watch, set `TMUX1C_LOG` *when creating the
 session*:
