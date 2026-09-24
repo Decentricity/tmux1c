@@ -7,11 +7,12 @@ DETAILS=('micro, files, git, Pi, logs, htop' 'Pi, git, tests, shell' 'Pi, GPU, C
 
 usage() {
   cat <<'EOF'
-Usage: 1c [PRESET|list|doctor|help]
+Usage: 1c [PRESET|setup|check|list|doctor|help]
 
 Run 1c with no arguments for the arrow-key menu. Up/Down selects, Enter
 starts, q or Esc quits. Each preset has a persistent tmux session.
 Detach with Ctrl-b d; rerun the same command to resume.
+Use '1c setup' to revisit first-run choices or '1c check' to diagnose.
 EOF
 }
 
@@ -23,16 +24,24 @@ list_presets() {
 }
 
 doctor() {
-  local program
+  local program gpu='none'
+  if [[ -r ${TMUX1C_CONFIG_DIR:-$HOME/.config/tmux1c}/gpu ]]; then
+    IFS= read -r gpu <"${TMUX1C_CONFIG_DIR:-$HOME/.config/tmux1c}/gpu" || true
+  fi
   for program in tmux htop nvtop top micro yazi mc pi git lazygit lnav \
                  ollama gcal calcurse telegramy whatsappy browsh bookmarks \
                  exa-search living-caca mplay-caca soloist cava gh; do
+    if [[ $program == nvtop && $gpu != nvidia ]]; then
+      printf '%-15s %s\n' nvtop 'skipped (no NVIDIA selected)'
+      continue
+    fi
     if command -v "$program" >/dev/null 2>&1; then
       printf '%-15s %s\n' "$program" "$(command -v "$program")"
     else
       printf '%-15s %s\n' "$program" 'missing (optional unless tmux)'
     fi
   done
+  printf 'GPU preference: %s\n' "$gpu"
 }
 
 menu() {
@@ -100,11 +109,22 @@ monitor() {
   fi
 }
 
+gpu_monitor() {
+  local gpu='none' config_dir=${TMUX1C_CONFIG_DIR:-"$HOME/.config/tmux1c"}
+  if [[ -r $config_dir/gpu ]]; then
+    IFS= read -r gpu <"$config_dir/gpu" || true
+  fi
+  # Without an explicit NVIDIA answer this pane stays a normal, blank shell.
+  if [[ $gpu == nvidia ]]; then
+    launch "$1" nvtop nvtop 'nvtop is missing; run 1c setup to install it.'
+  fi
+}
+
 files() {
-  if command -v yazi >/dev/null 2>&1; then
-    send_command "$1" yazi
-  elif command -v mc >/dev/null 2>&1; then
+  if command -v mc >/dev/null 2>&1; then
     send_command "$1" mc
+  elif command -v yazi >/dev/null 2>&1; then
+    send_command "$1" yazi
   else
     hint "$1" 'Install yazi or mc for a file manager; this is a shell.'
   fi
@@ -212,7 +232,7 @@ start_preset() {
         b=$(split_v "$first" 23)  # Ollama below Pi
         c=$(split_v "$a" 50)      # htop below nvtop
         agent "$first"; ollama_status "$b"
-        monitor "$a" nvtop; monitor "$c" htop
+        gpu_monitor "$a"; monitor "$c" htop
         shell_pane=$first
         ;;
       git-review)
@@ -285,7 +305,7 @@ start_preset() {
       dashboard)
         a=$(split_h "$first" 50)
         shell_pane=$(split_v "$a" 55)
-        monitor "$first" htop; monitor "$a" nvtop
+        monitor "$first" htop; gpu_monitor "$a"
         ;;
       focus)
         shell_pane=$(split_h "$first" 65)
@@ -304,8 +324,14 @@ start_preset() {
 }
 
 preset=${1:-}
+setup_script=${TMUX1C_DATA_DIR:-"$HOME/.local/share/tmux1c"}/first-run.sh
+if [[ ! -r $setup_script ]]; then
+  setup_script=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/first-run.sh
+fi
 case "$preset" in
   '') menu ;;
+  setup) bash "$setup_script"; exit $? ;;
+  check) bash "$setup_script" --check; exit $? ;;
   list) list_presets; exit 0 ;;
   doctor) doctor; exit 0 ;;
   help|-h|--help) usage; exit 0 ;;
@@ -321,6 +347,9 @@ case "$preset" in
     fi
     ;;
 esac
+if [[ ! -f ${TMUX1C_CONFIG_DIR:-$HOME/.config/tmux1c}/first-run.done ]]; then
+  bash "$setup_script" || exit $?
+fi
 if ! command -v tmux >/dev/null 2>&1; then
   printf '%s\n' 'tmux is missing. Run install.sh from the tmux1c repository first.' >&2
   exit 1
