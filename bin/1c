@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: 1c [dashboard|focus|shell|list|doctor|help]
+
+Run without arguments to choose a preset interactively.
+
+  dashboard   htop left, nvtop top right, shell bottom right
+  focus       htop left, shell right
+  shell       one full-screen shell
+  list        show available presets
+  doctor      check tmux and optional monitors
+
+The date and live clock appear in tmux's top status bar. Existing 1c
+sessions are reused; detach with Ctrl-b d.
+EOF
+}
+
+list_presets() {
+  printf '%s\n' 'dashboard  htop | nvtop above shell' 'focus      htop | shell' 'shell      plain tmux shell'
+}
+
+doctor() {
+  local program
+  for program in tmux htop nvtop; do
+    if command -v "$program" >/dev/null 2>&1; then
+      printf '%-6s %s\n' "$program" "$(command -v "$program")"
+    else
+      printf '%-6s %s\n' "$program" 'missing'
+    fi
+  done
+  printf '%s\n' 'htop/nvtop are optional; missing monitors fall back to top.'
+}
+
+menu() {
+  local choice
+  if [[ ! -t 0 || ! -r /dev/tty ]]; then
+    usage
+    exit 2
+  fi
+  printf '%s\n' '1c presets:' '  1) dashboard' '  2) focus' '  3) shell' '  q) quit'
+  read -r -p '> ' choice </dev/tty || exit 0
+  case "$choice" in
+    1|dashboard) preset=dashboard ;;
+    2|focus)     preset=focus ;;
+    3|shell)     preset=shell ;;
+    q|Q|quit)    exit 0 ;;
+    *) printf 'Unknown choice: %s\n' "$choice" >&2; exit 2 ;;
+  esac
+}
+
+send_command() {
+  local pane=$1 command=$2
+  tmux send-keys -t "$pane" -l "$command"
+  tmux send-keys -t "$pane" Enter
+}
+
+configure_bar() {
+  local session=$1 preset=$2
+  tmux set-option -t "$session" status on
+  tmux set-option -t "$session" status-position top
+  tmux set-option -t "$session" status-interval 1
+  tmux set-option -t "$session" status-style 'bg=colour235,fg=colour250'
+  tmux set-option -t "$session" status-left " 1c / $preset "
+  tmux set-option -t "$session" status-left-length 30
+  tmux set-option -t "$session" status-right ' %a %d %b %Y  %H:%M:%S '
+  tmux set-option -t "$session" status-right-length 40
+}
+
+run_monitor() {
+  local pane=$1 program=$2
+  if command -v "$program" >/dev/null 2>&1; then
+    send_command "$pane" "$program"
+  elif command -v top >/dev/null 2>&1; then
+    send_command "$pane" "printf '%s\\n' '$program is not installed; showing top instead.'; top"
+  else
+    send_command "$pane" "printf '%s\\n' '$program and top are not installed.'"
+  fi
+}
+
+start_preset() {
+  local preset=$1 session="1c-$1" left right shell_pane
+  if ! tmux has-session -t "=$session" 2>/dev/null; then
+    # Pane IDs stay stable after splits; positions (0.0, 0.1, ...) do not.
+    left=$(tmux new-session -d -s "$session" -n main -c "$PWD" -P -F '#{pane_id}')
+    shell_pane=$left
+    case "$preset" in
+      dashboard)
+        right=$(tmux split-window -h -p 50 -t "$left" -c "$PWD" -P -F '#{pane_id}')
+        shell_pane=$(tmux split-window -v -p 55 -t "$right" -c "$PWD" -P -F '#{pane_id}')
+        run_monitor "$left" htop
+        run_monitor "$right" nvtop
+        ;;
+      focus)
+        shell_pane=$(tmux split-window -h -p 65 -t "$left" -c "$PWD" -P -F '#{pane_id}')
+        run_monitor "$left" htop
+        ;;
+      shell) ;;
+    esac
+    configure_bar "$session" "$preset"
+    tmux select-pane -t "$shell_pane"
+  fi
+
+  if [[ -n ${TMUX:-} ]]; then
+    tmux switch-client -t "$session"
+  else
+    tmux attach-session -t "$session"
+  fi
+}
+
+preset=${1:-}
+case "$preset" in
+  '') menu ;;
+  list) list_presets; exit 0 ;;
+  doctor) doctor; exit 0 ;;
+  help|-h|--help) usage; exit 0 ;;
+  dashboard|focus|shell) ;;
+  *) printf 'Unknown preset: %s\n' "$preset" >&2; usage >&2; exit 2 ;;
+esac
+
+if ! command -v tmux >/dev/null 2>&1; then
+  printf '%s\n' 'tmux is missing. Run install.sh from the tmux1c repository first.' >&2
+  exit 1
+fi
+if [[ ! -t 0 || ! -t 1 ]]; then
+  printf '%s\n' '1c needs an interactive terminal to attach to tmux.' >&2
+  exit 1
+fi
+start_preset "$preset"
