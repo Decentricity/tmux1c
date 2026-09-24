@@ -90,6 +90,10 @@ with tempfile.TemporaryDirectory() as directory:
     project = temp / "project"
     project.mkdir()
     subprocess.run(["git", "init", "-q", str(project)], check=True)
+    config = temp / ".config/tmux1c"
+    config.mkdir(parents=True)
+    (config / "first-run.done").touch()
+    (config / "gpu").write_text("none\n")
     env = dict(os.environ, HOME=str(temp), PATH=f"{bindir}:{os.environ['PATH']}",
                TMUX1C_TEST_LOG=str(log), TMUX1C_TEST_STATE=str(state),
                TMUX1C_LOG=str(temp / "app log.txt"), TERM="xterm-256color")
@@ -112,8 +116,16 @@ with tempfile.TemporaryDirectory() as directory:
             assert any(row == "send-keys -t %1 -l micro" for row in entries), entries
         if profile == "service-watch":
             assert any('lnav "$TMUX1C_LOG"' in row for row in entries), entries
+        if profile in ("model-lab", "dashboard"):
+            assert not any(row.endswith("-l nvtop") for row in entries), profile
         run_tty([profile], env, project)
         assert sum(row.startswith("new-session ") for row in log.read_text().splitlines()) == 1
+
+    (config / "gpu").write_text("nvidia\n")
+    (state / "1c-dashboard").unlink()
+    log.write_text("")
+    run_tty(["dashboard"], env, project)
+    assert any(row.endswith("-l nvtop") for row in log.read_text().splitlines())
 
     log.write_text("")
     run_tty([], env, project, keys=b"\x1b[B\r")
