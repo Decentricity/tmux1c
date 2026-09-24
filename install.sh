@@ -4,8 +4,8 @@ set -euo pipefail
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 install_dir=${TMUX1C_BIN_DIR:-"$HOME/.local/bin"}
 
-install_tmux() {
-  local -a elevate=()
+require_root() {
+  elevate=()
   if [[ $(id -u) -ne 0 ]]; then
     if command -v sudo >/dev/null 2>&1; then
       elevate=(sudo)
@@ -14,21 +14,38 @@ install_tmux() {
       exit 1
     fi
   fi
+}
+
+install_tmux() {
+  local -a elevate=()
 
   if command -v apt-get >/dev/null 2>&1; then
-    "${elevate[@]}" apt-get install -y tmux
+    require_root
+    if ! "${elevate[@]}" apt-get install -y tmux; then
+      "${elevate[@]}" apt-get update
+      "${elevate[@]}" apt-get install -y tmux
+    fi
   elif command -v dnf >/dev/null 2>&1; then
+    require_root
     "${elevate[@]}" dnf install -y tmux
   elif command -v pacman >/dev/null 2>&1; then
+    require_root
     "${elevate[@]}" pacman -S --needed tmux
   elif command -v apk >/dev/null 2>&1; then
+    require_root
     "${elevate[@]}" apk add tmux
   elif command -v zypper >/dev/null 2>&1; then
+    require_root
     "${elevate[@]}" zypper install -y tmux
   elif command -v brew >/dev/null 2>&1; then
     brew install tmux
   elif command -v pkg >/dev/null 2>&1; then
-    "${elevate[@]}" pkg install -y tmux
+    if [[ -n ${TERMUX_VERSION:-} || ${PREFIX:-} == */com.termux/* ]]; then
+      pkg install -y tmux
+    else
+      require_root
+      "${elevate[@]}" pkg install -y tmux
+    fi
   else
     printf '%s\n' 'Unknown package manager. Install tmux manually and rerun install.sh.' >&2
     exit 1
