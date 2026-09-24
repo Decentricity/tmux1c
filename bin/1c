@@ -1,61 +1,168 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+PRESETS=(ide agent-workshop model-lab git-review service-watch meeting-desk comms research-desk terminal-cinema travel-light dashboard focus shell)
+LABELS=('IDE' 'Agent workshop' 'Model lab' 'Git review' 'Service watch' 'Meeting desk' 'Comms' 'Research desk' 'Terminal cinema' 'Travel light' 'Dashboard' 'Focus' 'Plain shell')
+DETAILS=('micro, files, git, Pi, logs, htop' 'Pi, git, tests, shell' 'Pi, GPU, CPU, Ollama' 'lazygit, shell, PRs' 'logs, services, resources' 'calendar, notes, scratch' 'Telegram, WhatsApp, notes' 'Browsh, bookmarks, notes' 'caca video, Soloist, cava' 'shell, files, minimal load' 'htop, nvtop, shell' 'htop, shell' 'single shell')
+
 usage() {
   cat <<'EOF'
-Usage: 1c [dashboard|focus|shell|list|doctor|help]
+Usage: 1c [PRESET|list|doctor|help]
 
-Run without arguments to choose a preset interactively.
-
-  dashboard   htop left, nvtop top right, shell bottom right
-  focus       htop left, shell right
-  shell       one full-screen shell
-  list        show available presets
-  doctor      check tmux and optional monitors
-
-The date and live clock appear in tmux's top status bar. Existing 1c
-sessions are reused; detach with Ctrl-b d.
+Run 1c with no arguments for the arrow-key menu. Up/Down selects, Enter
+starts, q or Esc quits. Each preset has a persistent tmux session.
+Detach with Ctrl-b d; rerun the same command to resume.
 EOF
 }
 
 list_presets() {
-  printf '%s\n' 'dashboard  htop | nvtop above shell' 'focus      htop | shell' 'shell      plain tmux shell'
+  local i
+  for ((i=0; i<${#PRESETS[@]}; i++)); do
+    printf '%-18s %s\n' "${PRESETS[i]}" "${DETAILS[i]}"
+  done
 }
 
 doctor() {
   local program
-  for program in tmux htop nvtop; do
+  for program in tmux htop nvtop top micro yazi mc pi git lazygit lnav \
+                 ollama gcal calcurse telegramy whatsappy browsh bookmarks \
+                 exa-search living-caca mplay-caca soloist cava gh; do
     if command -v "$program" >/dev/null 2>&1; then
-      printf '%-6s %s\n' "$program" "$(command -v "$program")"
+      printf '%-15s %s\n' "$program" "$(command -v "$program")"
     else
-      printf '%-6s %s\n' "$program" 'missing'
+      printf '%-15s %s\n' "$program" 'missing (optional unless tmux)'
     fi
   done
-  printf '%s\n' 'htop/nvtop are optional; missing monitors fall back to top.'
 }
 
 menu() {
-  local choice
-  if [[ ! -t 0 || ! -r /dev/tty ]]; then
-    usage
-    exit 2
-  fi
-  printf '%s\n' '1c presets:' '  1) dashboard' '  2) focus' '  3) shell' '  q) quit'
-  read -r -p '> ' choice </dev/tty || exit 0
-  case "$choice" in
-    1|dashboard) preset=dashboard ;;
-    2|focus)     preset=focus ;;
-    3|shell)     preset=shell ;;
-    q|Q|quit)    exit 0 ;;
-    *) printf 'Unknown choice: %s\n' "$choice" >&2; exit 2 ;;
-  esac
+  local selected=0 key next final i
+  [[ -t 0 && -t 1 && -r /dev/tty ]] || { usage; return 2; }
+  trap 'printf "\033[?25h"' EXIT
+  printf '\033[?25l'
+  while :; do
+    printf '\033[H\033[2J%s\n\n' '1c  Choose a workspace'
+    for ((i=0; i<${#PRESETS[@]}; i++)); do
+      if ((i == selected)); then
+        printf '\033[7m > %-17s %s \033[0m\n' "${LABELS[i]}" "${DETAILS[i]}"
+      else
+        printf '   %-17s %s\n' "${LABELS[i]}" "${DETAILS[i]}"
+      fi
+    done
+    printf '\n↑/↓ select  Enter start  q quit\n'
+    IFS= read -rsn1 key </dev/tty || exit 0
+    case "$key" in
+      '') preset=${PRESETS[selected]}; printf '\033[?25h\033[H\033[2J'; trap - EXIT; return 0 ;;
+      q|Q) exit 0 ;;
+      j) selected=$(((selected+1) % ${#PRESETS[@]})) ;;
+      k) selected=$(((selected+${#PRESETS[@]}-1) % ${#PRESETS[@]})) ;;
+      $'\e')
+        next=''
+        IFS= read -rsn1 -t 0.2 next </dev/tty || exit 0
+        if [[ $next == '[' || $next == O ]]; then
+          final=''
+          IFS= read -rsn1 -t 0.2 final </dev/tty || true
+          case "$final" in
+            A) selected=$(((selected+${#PRESETS[@]}-1) % ${#PRESETS[@]})) ;;
+            B) selected=$(((selected+1) % ${#PRESETS[@]})) ;;
+            H) selected=0 ;;
+            F) selected=$((${#PRESETS[@]}-1)) ;;
+          esac
+        fi
+        ;;
+    esac
+  done
 }
 
 send_command() {
-  local pane=$1 command=$2
-  tmux send-keys -t "$pane" -l "$command"
-  tmux send-keys -t "$pane" Enter
+  tmux send-keys -t "$1" -l "$2"
+  tmux send-keys -t "$1" Enter
 }
+
+hint() { send_command "$1" "printf '%s\\n' '$2'"; }
+
+launch() {
+  if command -v "$2" >/dev/null 2>&1; then
+    send_command "$1" "$3"
+  else
+    hint "$1" "$4"
+  fi
+}
+
+monitor() {
+  if command -v "$2" >/dev/null 2>&1; then
+    send_command "$1" "$2"
+  elif command -v top >/dev/null 2>&1; then
+    hint "$1" "$2 missing; using top."
+    send_command "$1" top
+  else
+    hint "$1" "$2 missing; install it for this pane."
+  fi
+}
+
+files() {
+  if command -v yazi >/dev/null 2>&1; then
+    send_command "$1" yazi
+  elif command -v mc >/dev/null 2>&1; then
+    send_command "$1" mc
+  else
+    hint "$1" 'Install yazi or mc for a file manager; this is a shell.'
+  fi
+}
+
+editor() {
+  local command
+  if command -v micro >/dev/null 2>&1; then
+    command=micro
+  elif command -v vi >/dev/null 2>&1; then
+    command=vi
+  else
+    hint "$1" 'Install micro for an editor; this is a shell.'
+    return
+  fi
+  if [[ ${2:-} == notes ]]; then
+    send_command "$1" "$command \"\$TMUX1C_NOTES\""
+  else
+    send_command "$1" "$command"
+  fi
+}
+
+agent() { launch "$1" pi pi 'Install/configure Pi to use the agent pane.'; }
+
+git_status() {
+  if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    send_command "$1" 'while :; do clear; git status --short --branch; sleep 10; done'
+  else
+    hint "$1" 'Open this preset from inside a Git repository for live status.'
+  fi
+}
+
+logs() {
+  if [[ -n ${TMUX1C_LOG:-} ]]; then
+    send_command "$1" 'tail -n 80 -F "$TMUX1C_LOG"'
+  else
+    hint "$1" 'Run build/tests here, or launch with TMUX1C_LOG=/path/to/log.'
+  fi
+}
+
+ollama_status() {
+  if command -v ollama >/dev/null 2>&1; then
+    send_command "$1" 'while :; do clear; ollama ps; sleep 10; done'
+  else
+    hint "$1" 'Install Ollama to display loaded models here.'
+  fi
+}
+
+calendar() {
+  if command -v gcal >/dev/null 2>&1; then
+    send_command "$1" gcal
+  else
+    launch "$1" calcurse calcurse 'Install calcurse or configure gcal for a calendar.'
+  fi
+}
+
+split_h() { tmux split-window -h -p "$2" -t "$1" -c "$PWD" -P -F '#{pane_id}'; }
+split_v() { tmux split-window -v -p "$2" -t "$1" -c "$PWD" -P -F '#{pane_id}'; }
 
 configure_bar() {
   local session=$1 preset=$2
@@ -69,40 +176,126 @@ configure_bar() {
   tmux set-option -t "$session" status-right-length 40
 }
 
-run_monitor() {
-  local pane=$1 program=$2
-  if command -v "$program" >/dev/null 2>&1; then
-    send_command "$pane" "$program"
-  elif command -v top >/dev/null 2>&1; then
-    send_command "$pane" "printf '%s\\n' '$program is not installed; showing top instead.'; top"
-  else
-    send_command "$pane" "printf '%s\\n' '$program and top are not installed.'"
-  fi
-}
-
 start_preset() {
-  local preset=$1 session="1c-$1" left right shell_pane
+  local preset=$1 session="1c-$1" first a b c d e shell_pane notes_dir
   if ! tmux has-session -t "=$session" 2>/dev/null; then
-    # Pane IDs stay stable after splits; positions (0.0, 0.1, ...) do not.
-    left=$(tmux new-session -d -s "$session" -n main -c "$PWD" -P -F '#{pane_id}')
-    shell_pane=$left
+    first=$(tmux new-session -d -s "$session" -n main -c "$PWD" -P -F '#{pane_id}')
+    shell_pane=$first
+    if [[ -n ${TMUX1C_LOG:-} ]]; then
+      tmux set-environment -t "$session" TMUX1C_LOG "$TMUX1C_LOG"
+    fi
+    if [[ $preset == meeting-desk || $preset == comms || $preset == research-desk ]]; then
+      notes_dir="$HOME/.local/share/tmux1c/notes"
+      mkdir -p "$notes_dir"
+      tmux set-environment -t "$session" TMUX1C_NOTES "$notes_dir/$(date +%F).md"
+    fi
     case "$preset" in
+      ide)
+        a=$(split_h "$first" 78)  # left files | rest
+        b=$(split_h "$a" 38)      # center micro | right Pi
+        c=$(split_v "$first" 30)  # git below files
+        d=$(split_v "$a" 22)      # logs below editor
+        e=$(split_v "$b" 28)      # htop below Pi
+        files "$first"; git_status "$c"; editor "$a"; logs "$d"
+        agent "$b"; monitor "$e" htop
+        shell_pane=$a
+        ;;
+      agent-workshop)
+        a=$(split_h "$first" 76)  # git | rest
+        b=$(split_h "$a" 30)      # Pi | shell
+        c=$(split_v "$a" 27)      # tests below Pi
+        git_status "$first"; agent "$a"; hint "$c" 'Run tests here.'
+        shell_pane=$b
+        ;;
+      model-lab)
+        a=$(split_h "$first" 32)  # Pi | monitors
+        b=$(split_v "$first" 23)  # Ollama below Pi
+        c=$(split_v "$a" 50)      # htop below nvtop
+        agent "$first"; ollama_status "$b"
+        monitor "$a" nvtop; monitor "$c" htop
+        shell_pane=$first
+        ;;
+      git-review)
+        a=$(split_h "$first" 35)  # lazygit | shell
+        b=$(split_v "$a" 35)      # PRs below shell
+        if command -v lazygit >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+          send_command "$first" lazygit
+        else
+          hint "$first" 'Install lazygit for interactive Git review.'
+          git_status "$first"
+        fi
+        launch "$b" gh 'gh pr status' 'Install/authenticate gh for PR status.'
+        shell_pane=$a
+        ;;
+      service-watch)
+        a=$(split_h "$first" 68)  # shell | logs
+        b=$(split_v "$first" 50)  # htop below shell
+        if [[ -n ${TMUX1C_LOG:-} ]]; then
+          launch "$a" lnav 'lnav "$TMUX1C_LOG"' 'Install lnav, or use tail -F on your log.'
+        else
+          hint "$a" 'Launch with TMUX1C_LOG=/path/to/log to open it in lnav.'
+        fi
+        monitor "$b" htop
+        if command -v systemctl >/dev/null 2>&1; then
+          send_command "$first" 'systemctl --user --failed --no-pager'
+        fi
+        shell_pane=$first
+        ;;
+      meeting-desk)
+        a=$(split_h "$first" 75)  # calendar | notes/side
+        b=$(split_h "$a" 25)      # notes | side shell
+        c=$(split_v "$a" 23)      # scratch below notes
+        calendar "$first"; editor "$a" notes
+        hint "$c" 'Scratch shell for the meeting.'
+        shell_pane=$b
+        ;;
+      comms)
+        a=$(split_v "$first" 30)  # notes below clients
+        b=$(split_h "$first" 50)  # Telegram | WhatsApp
+        launch "$first" telegramy telegramy 'Install/configure telegramy for Telegram.'
+        launch "$b" whatsappy whatsappy 'Install/configure whatsappy for WhatsApp.'
+        editor "$a" notes
+        shell_pane=$a
+        ;;
+      research-desk)
+        a=$(split_h "$first" 80)  # bookmarks | rest
+        b=$(split_h "$a" 37)      # Browsh | notes
+        c=$(split_v "$a" 25)      # search below Browsh
+        launch "$first" bookmarks bookmarks 'Install/configure bookmarks or use this shell.'
+        launch "$a" browsh browsh 'Install/configure Browsh for the browser pane.'
+        editor "$b" notes
+        hint "$c" 'Try exa-search QUERY or use this search shell.'
+        shell_pane=$c
+        ;;
+      terminal-cinema)
+        a=$(split_h "$first" 30)  # video | music
+        b=$(split_v "$first" 23)  # queue shell below video
+        c=$(split_v "$a" 40)      # cava below Soloist
+        launch "$first" living-caca living-caca 'Try living-caca, mplay-caca FILE, or yt-video --play QUERY.'
+        hint "$b" 'Choose a video or music track here.'
+        launch "$a" soloist soloist 'Install/configure Soloist for Spotify.'
+        launch "$c" cava cava 'Install cava for the audio visualizer.'
+        shell_pane=$b
+        ;;
+      travel-light)
+        a=$(split_h "$first" 22)  # large shell | small files
+        files "$a"
+        shell_pane=$first
+        ;;
       dashboard)
-        right=$(tmux split-window -h -p 50 -t "$left" -c "$PWD" -P -F '#{pane_id}')
-        shell_pane=$(tmux split-window -v -p 55 -t "$right" -c "$PWD" -P -F '#{pane_id}')
-        run_monitor "$left" htop
-        run_monitor "$right" nvtop
+        a=$(split_h "$first" 50)
+        shell_pane=$(split_v "$a" 55)
+        monitor "$first" htop; monitor "$a" nvtop
         ;;
       focus)
-        shell_pane=$(tmux split-window -h -p 65 -t "$left" -c "$PWD" -P -F '#{pane_id}')
-        run_monitor "$left" htop
+        shell_pane=$(split_h "$first" 65)
+        monitor "$first" htop
         ;;
       shell) ;;
     esac
     configure_bar "$session" "$preset"
     tmux select-pane -t "$shell_pane"
   fi
-
   if [[ -n ${TMUX:-} ]]; then
     tmux switch-client -t "$session"
   else
@@ -116,10 +309,18 @@ case "$preset" in
   list) list_presets; exit 0 ;;
   doctor) doctor; exit 0 ;;
   help|-h|--help) usage; exit 0 ;;
-  dashboard|focus|shell) ;;
-  *) printf 'Unknown preset: %s\n' "$preset" >&2; usage >&2; exit 2 ;;
+  *)
+    valid=false
+    for name in "${PRESETS[@]}"; do
+      [[ $preset == "$name" ]] && valid=true && break
+    done
+    if [[ $valid == false ]]; then
+      printf 'Unknown preset: %s\n' "$preset" >&2
+      usage >&2
+      exit 2
+    fi
+    ;;
 esac
-
 if ! command -v tmux >/dev/null 2>&1; then
   printf '%s\n' 'tmux is missing. Run install.sh from the tmux1c repository first.' >&2
   exit 1
